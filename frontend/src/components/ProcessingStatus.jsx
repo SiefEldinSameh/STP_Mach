@@ -1,57 +1,67 @@
-const STAGE_COPY = {
-  queued: {
-    label: 'Queued',
-    detail: 'Your file is waiting for the background worker.',
-  },
-  loading: {
-    label: 'Preparing',
-    detail: 'Setting up the pipeline and document workspace.',
-  },
-  table_detection: {
-    label: 'Detecting Tables',
-    detail: 'Scanning the document to find candidate tables.',
-  },
-  table_structure: {
-    label: 'Recognizing Structure',
-    detail: 'Recovering rows, columns, and span geometry.',
-  },
-  ocr: {
-    label: 'Running OCR',
-    detail: 'Reading cell text from the extracted table regions.',
-  },
-  finalizing: {
-    label: 'Finalizing',
-    detail: 'Saving crops and packaging the result payload.',
-  },
-};
+const STAGES = [
+  { key: 'queued',           label: 'Queued',     short: '⏳' },
+  { key: 'loading',          label: 'Preparing',  short: '⚙' },
+  { key: 'table_detection',  label: 'Detection',  short: '🔍' },
+  { key: 'table_structure',  label: 'Structure',  short: '⊞' },
+  { key: 'ocr',              label: 'OCR',        short: 'T' },
+  { key: 'finalizing',       label: 'Finalizing', short: '📦' },
+];
+
+function CheckIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="2 6 5 9 10 3" />
+    </svg>
+  );
+}
+
+function PipelineStepper({ progressStage }) {
+  const activeIdx = STAGES.findIndex(s => s.key === progressStage);
+
+  return (
+    <div className="stepper" style={{ marginTop: '1.25rem', marginBottom: '0.5rem' }}>
+      {STAGES.map((stage, i) => {
+        const isDone   = activeIdx > i;
+        const isActive = activeIdx === i;
+        let cls = 'stepper-step';
+        if (isDone)   cls += ' done';
+        if (isActive) cls += ' active';
+
+        return (
+          <div key={stage.key} className={cls}>
+            <div className="stepper-dot">
+              {isDone ? <CheckIcon /> : stage.short}
+            </div>
+            <div className="stepper-label">{stage.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function ProcessingStatus({ status, progressStage, error }) {
   if (status === 'idle') return null;
-
-  const stageInfo = STAGE_COPY[progressStage] || {
-    label: 'Processing',
-    detail: 'The pipeline is working through your document.',
-  };
 
   return (
     <div className="glass-card animate-fadeIn mt-3" style={{ textAlign: 'center', padding: '2rem' }}>
       {status === 'uploading' && (
         <>
           <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-          <h3>Uploading...</h3>
-          <p className="mt-1">Sending your file to the server.</p>
+          <h3>Uploading</h3>
+          <p className="mt-1" style={{ fontSize: '0.875rem' }}>Sending your file to the server…</p>
         </>
       )}
 
       {status === 'processing' && (
         <>
-          <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-          <div className="stack-sm">
-            <span className="badge badge-info">{stageInfo.label}</span>
-            <h3>Processing...</h3>
-          </div>
-          <p className="mt-1">{stageInfo.detail}</p>
-          <p style={{ fontSize: '0.8rem', marginTop: '0.5rem', color: 'var(--text-muted)' }}>
+          <div className="spinner" style={{ margin: '0 auto 0.75rem' }} />
+          <h3>Processing</h3>
+          <p style={{ fontSize: '0.875rem', marginTop: '0.35rem', color: 'var(--text-secondary)' }}>
+            Running the table extraction pipeline
+          </p>
+          <PipelineStepper progressStage={progressStage} />
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
             Large PDFs and low-resolution files can take a little longer.
           </p>
         </>
@@ -59,17 +69,45 @@ export default function ProcessingStatus({ status, progressStage, error }) {
 
       {status === 'error' && (
         <>
-          <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✖</div>
-          <h3 style={{ color: 'var(--danger)' }}>Error</h3>
-          <p className="mt-1">{error || 'Something went wrong.'}</p>
+          <div style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </div>
+          <h3 style={{ color: 'var(--danger)' }}>Processing Failed</h3>
+          <p className="mt-1" style={{ fontSize: '0.875rem' }}>{error || 'Something went wrong.'}</p>
         </>
       )}
 
       {status === 'completed' && (
         <>
-          <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✓</div>
-          <h3 style={{ color: 'var(--success)' }}>Processing Complete</h3>
-          <p className="mt-1">Review the extracted tables, edit cells if needed, then download.</p>
+          <div style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            background: 'rgba(16, 185, 129, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem',
+          }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+          <h3 style={{ color: 'var(--success)' }}>Complete</h3>
+          <p className="mt-1" style={{ fontSize: '0.875rem' }}>
+            Review the extracted tables below, edit cells if needed, then export.
+          </p>
         </>
       )}
     </div>

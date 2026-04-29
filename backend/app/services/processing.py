@@ -5,6 +5,7 @@ Async job management - runs heavy inference in background threads.
 import asyncio
 import csv
 import io
+import json
 import logging
 import os
 import threading
@@ -65,6 +66,7 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
             stage_timings_ms=result.get("stage_timings_ms", {}),
         )
         completed_job = _jobs[job_id]
+        _save_job_to_disk(job_id, completed_job)
         health_tracker.record_request(
             result["total_latency_ms"],
             True,
@@ -90,6 +92,7 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
             progress_stage="error",
         )
         failed_job = _jobs.get(job_id, {})
+        _save_job_to_disk(job_id, failed_job)
         health_tracker.record_request(
             0,
             False,
@@ -133,16 +136,70 @@ async def submit_job(file_path: str, original_filename: str) -> str:
     return job_id
 
 
+def _save_job_to_disk(job_id: str, job: dict) -> None:
+    """Persist a completed job to disk so it survives server restarts."""
+    output_dir = job.get("output_dir")
+    if not output_dir:
+        return
+    result_path = Path(output_dir) / "result.json"
+    try:
+        payload = {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "filename": job.get("filename"),
+            "total_latency_ms": job.get("total_latency_ms"),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "progress_stage": job.get("progress_stage"),
+            "stage_timings_ms": job.get("stage_timings_ms", {}),
+            "error": job.get("error"),
+            "result": job.get("result"),
+        }
+        result_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        logger.warning("Failed to persist result.json for job %s", job_id)
+
+
+def _load_job_from_disk(job_id: str) -> Optional[dict]:
+    """Load a previously completed job from disk (fallback when not in memory)."""
+    result_path = Path(OUTPUT_DIR) / job_id / "result.json"
+    if not result_path.is_file():
+        return None
+    try:
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        return {
+            "status": data.get("status", "completed"),
+            "filename": data.get("filename"),
+            "total_latency_ms": data.get("total_latency_ms"),
+            "started_at": data.get("started_at"),
+            "finished_at": data.get("finished_at"),
+            "progress_stage": data.get("progress_stage", "completed"),
+            "stage_timings_ms": data.get("stage_timings_ms", {}),
+            "error": data.get("error"),
+            "result": data.get("result"),
+            "output_dir": str(Path(OUTPUT_DIR) / job_id),
+            "file_path": None,
+        }
+    except Exception:
+        logger.warning("Failed to load result.json for job %s", job_id)
+        return None
+
+
 def get_job(job_id: str) -> Optional[dict]:
-    """Get job status and results."""
-    return _jobs.get(job_id)
+    """Get job by ID — checks memory first, then falls back to disk."""
+    job = _jobs.get(job_id)
+    if job is not None:
+        return job
+    return _load_job_from_disk(job_id)
 
 
 def update_job_cell(job_id: str, page: int, table_id: int, row: int, col: int, text: str) -> bool:
-    """Update a cell's text in the job results."""
-    job = _jobs.get(job_id)
+    """Update a cell's text in the job results (in-memory or disk-backed)."""
+    job = get_job(job_id)
     if not job or job["status"] != "completed" or not job["result"]:
         return False
+
+    from_disk = job_id not in _jobs
 
     for page_data in job["result"].get("pages", []):
         if page_data["page"] != page:
@@ -153,12 +210,14 @@ def update_job_cell(job_id: str, page: int, table_id: int, row: int, col: int, t
             for cell in table["cells"]:
                 if cell["row"] == row and cell["col"] == col:
                     cell["text"] = text
+                    if from_disk:
+                        _save_job_to_disk(job_id, job)
                     return True
     return False
 
 
 def job_has_tables(job_id: str) -> bool:
-    job = _jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job["status"] != "completed":
         return False
     return _has_tables(job.get("result"))
@@ -223,7 +282,7 @@ def generate_csv_for_result(result: dict, csv_format: str = "matrix") -> Optiona
 
 
 def generate_crops_zip(job_id: str) -> Optional[io.BytesIO]:
-    job = _jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job["status"] != "completed":
         return None
 

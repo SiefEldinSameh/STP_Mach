@@ -80,6 +80,14 @@ class RecentJob(BaseModel):
     error: Optional[str] = None
 
 
+class StageHealthRow(BaseModel):
+    sample_count: int
+    avg_ms: float
+    min_ms: float
+    max_ms: float
+    p95_ms: float
+
+
 class HealthResponse(BaseModel):
     status: str
     models_loaded: bool
@@ -91,4 +99,5 @@ class HealthResponse(BaseModel):
     average_latency_ms: float
     success_rate: float
     stage_average_ms: Dict[str, float]
+    stage_health_matrix: Dict[str, StageHealthRow]
     recent_jobs: List[RecentJob]

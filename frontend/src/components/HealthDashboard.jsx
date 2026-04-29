@@ -1,6 +1,8 @@
 import { startTransition, useEffect, useEffectEvent, useState } from 'react';
 import { getHealth } from '../api/client';
 
+const STAGE_ORDER = ['table_detection', 'table_structure', 'ocr', 'total'];
+
 function formatStageLabel(stage) {
   return stage
     .split('_')
@@ -8,7 +10,7 @@ function formatStageLabel(stage) {
     .join(' ');
 }
 
-export default function HealthDashboard() {
+export default function HealthDashboard({ onLoadJob }) {
   const [health, setHealth] = useState(null);
   const [error, setError] = useState(null);
 
@@ -54,22 +56,47 @@ export default function HealthDashboard() {
     );
   }
 
-  const stageEntries = Object.entries(health.stage_average_ms || {});
+  const stageEntries = Object.entries(health.stage_average_ms || {}).sort(
+    (a, b) => {
+      const ia = STAGE_ORDER.indexOf(a[0]);
+      const ib = STAGE_ORDER.indexOf(b[0]);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    }
+  );
   const maxStageValue = Math.max(1, ...stageEntries.map(([, value]) => value || 0));
+
+  const matrix = health.stage_health_matrix || {};
+  const orderedStages = [
+    ...STAGE_ORDER.filter(s => matrix[s] != null),
+    ...Object.keys(matrix).filter(s => !STAGE_ORDER.includes(s)),
+  ];
+  const maxAvg = Math.max(1, ...orderedStages.map(s => matrix[s]?.avg_ms || 0));
 
   return (
     <div className="animate-fadeIn stack-md">
       <div>
         <h2 style={{ marginBottom: '0.5rem' }}>System Health</h2>
-        <p>Live backend status, rolling stage latency, and the latest processed jobs.</p>
+        <p>
+          Live backend status, stage timing charts and matrix, recent jobs, and{' '}
+          <strong>View Results</strong> to open the full extraction on the Extract tab.
+        </p>
       </div>
 
       <div className="health-grid">
         <div className="glass-card metric-card">
           <p className="metric-label">Status</p>
-          <span className={`badge ${health.models_loaded ? 'badge-success' : 'badge-warning'}`}>
-            {health.models_loaded ? 'Models Loaded' : 'Loading Models'}
-          </span>
+          {health.models_loaded ? (
+            <span className="badge badge-success">Models Ready</span>
+          ) : health.model_load_error ? (
+            <div className="stack-xs">
+              <span className="badge badge-danger">Load Failed</span>
+              <span style={{ fontSize: '0.68rem', color: 'var(--danger)', wordBreak: 'break-word' }}>
+                {health.model_load_error}
+              </span>
+            </div>
+          ) : (
+            <span className="badge badge-warning">Loading Models</span>
+          )}
         </div>
 
         <div className="glass-card metric-card">
@@ -102,7 +129,7 @@ export default function HealthDashboard() {
           <span className="badge badge-info">Rolling in-memory metrics</span>
         </div>
 
-        <div className="stack-sm">
+        <div className="stack-sm" style={{ marginBottom: '1.5rem' }}>
           {stageEntries.map(([stage, value]) => (
             <div key={stage} className="stage-row">
               <div className="stage-row-header">
@@ -117,6 +144,65 @@ export default function HealthDashboard() {
               </div>
             </div>
           ))}
+        </div>
+
+        <div
+          style={{
+            borderTop: '1px solid var(--border-glass)',
+            paddingTop: '1.25rem',
+            marginTop: '0.25rem',
+          }}
+        >
+          <div className="flex items-center justify-between gap-2" style={{ marginBottom: '0.65rem', flexWrap: 'wrap' }}>
+            <h4 style={{ margin: 0, fontSize: '1rem' }}>Stage timing matrix</h4>
+            <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>Samples · min · max · P95</span>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+            Same stages as above; columns summarize the rolling buffer of per-job stage latencies (ms).
+          </p>
+
+          {orderedStages.length === 0 ? (
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>No matrix data yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table health-matrix-table">
+                <thead>
+                  <tr>
+                    <th>Stage</th>
+                    <th>Samples</th>
+                    <th>Avg</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>P95</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderedStages.map(stage => {
+                    const row = matrix[stage];
+                    const heat = maxAvg > 0 ? Math.min(1, (row?.avg_ms ?? 0) / maxAvg) : 0;
+                    return (
+                      <tr key={stage}>
+                        <td>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{formatStageLabel(stage)}</span>
+                        </td>
+                        <td>{row?.sample_count ?? 0}</td>
+                        <td
+                          style={{
+                            background: `rgba(99, 102, 241, ${0.06 + heat * 0.14})`,
+                          }}
+                        >
+                          {row?.sample_count ? row.avg_ms : '—'}
+                        </td>
+                        <td>{row?.sample_count ? row.min_ms : '—'}</td>
+                        <td>{row?.sample_count ? row.max_ms : '—'}</td>
+                        <td>{row?.sample_count ? row.p95_ms : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
@@ -140,6 +226,7 @@ export default function HealthDashboard() {
                   <th>Latency</th>
                   <th>Started</th>
                   <th>Finished</th>
+                  {onLoadJob && <th>Results</th>}
                 </tr>
               </thead>
               <tbody>
@@ -149,6 +236,9 @@ export default function HealthDashboard() {
                       <div className="stack-xs">
                         <strong style={{ fontSize: '0.85rem' }}>{job.filename || job.job_id}</strong>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{job.job_id}</span>
+                        {job.error && (
+                          <span style={{ color: 'var(--danger)', fontSize: '0.72rem' }}>{job.error}</span>
+                        )}
                       </div>
                     </td>
                     <td>
@@ -159,6 +249,20 @@ export default function HealthDashboard() {
                     <td>{job.total_latency_ms} ms</td>
                     <td>{job.started_at ? new Date(job.started_at).toLocaleString() : '—'}</td>
                     <td>{job.finished_at ? new Date(job.finished_at).toLocaleString() : '—'}</td>
+                    {onLoadJob && (
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.72rem', padding: '0.25rem 0.65rem', whiteSpace: 'nowrap' }}
+                          disabled={job.status !== 'completed'}
+                          title={job.status !== 'completed' ? 'Only completed jobs can be viewed' : 'Open in Extract'}
+                          onClick={() => onLoadJob(job)}
+                        >
+                          View Results
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

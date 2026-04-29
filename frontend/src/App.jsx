@@ -3,6 +3,8 @@ import FileUpload from './components/FileUpload';
 import ProcessingStatus from './components/ProcessingStatus';
 import ResultsViewer from './components/ResultsViewer';
 import HealthDashboard from './components/HealthDashboard';
+import JobHistory from './components/JobHistory';
+import { useJobHistory } from './hooks/useJobHistory';
 import { editResults, getResults, uploadFile } from './api/client';
 
 function ThemeToggle() {
@@ -31,7 +33,6 @@ function ThemeToggle() {
 
 function applyCellEditToJobData(jobData, edit) {
   if (!jobData?.pages) return jobData;
-
   return {
     ...jobData,
     pages: jobData.pages.map(page => {
@@ -42,11 +43,11 @@ function applyCellEditToJobData(jobData, edit) {
           if (table.table_id !== edit.table_id) return table;
           return {
             ...table,
-            cells: (table.cells || []).map(cell => (
+            cells: (table.cells || []).map(cell =>
               cell.row === edit.row && cell.col === edit.col
                 ? { ...cell, text: edit.text }
                 : cell
-            )),
+            ),
           };
         }),
       };
@@ -60,8 +61,14 @@ export default function App() {
   const [progressStage, setProgressStage] = useState(null);
   const [error, setError] = useState(null);
   const [jobData, setJobData] = useState(null);
+  const [activeJobId, setActiveJobId] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [uploadKey, setUploadKey] = useState(0);
+
   const jobIdRef = useRef(null);
   const pollRef = useRef(null);
+
+  const { history, addJob, updateJob, clearHistory } = useJobHistory();
 
   const clearPolling = () => {
     if (pollRef.current) {
@@ -74,9 +81,7 @@ export default function App() {
 
   const schedulePoll = (jobId, delay = 2000) => {
     clearPolling();
-    pollRef.current = setTimeout(() => {
-      void pollJob(jobId);
-    }, delay);
+    pollRef.current = setTimeout(() => { void pollJob(jobId); }, delay);
   };
 
   const pollJob = async (jobId) => {
@@ -88,6 +93,12 @@ export default function App() {
         setJobData(result);
         setProgressStage('completed');
         setStatus('completed');
+        setActiveJobId(jobId);
+        updateJob(jobId, {
+          status: 'completed',
+          finished_at: result.finished_at,
+          total_latency_ms: result.total_latency_ms,
+        });
         return;
       }
 
@@ -96,6 +107,7 @@ export default function App() {
         setError(result.error || 'Processing failed');
         setProgressStage('error');
         setStatus('error');
+        updateJob(jobId, { status: 'error', finished_at: result.finished_at });
         return;
       }
 
@@ -112,12 +124,25 @@ export default function App() {
     setProgressStage('queued');
     setError(null);
     setJobData(null);
+    setActiveJobId(null);
 
     try {
       const { job_id: jobId } = await uploadFile(file);
       jobIdRef.current = jobId;
       setStatus('processing');
       setProgressStage('queued');
+      setActiveJobId(jobId);
+
+      const now = new Date().toISOString();
+      addJob({
+        job_id: jobId,
+        filename: file.name,
+        status: 'processing',
+        started_at: now,
+        finished_at: null,
+        total_latency_ms: null,
+      });
+
       schedulePoll(jobId, 1200);
     } catch (uploadError) {
       setError(uploadError.message);
@@ -132,13 +157,70 @@ export default function App() {
     setJobData(current => applyCellEditToJobData(current, edit));
   };
 
+  const loadJobFromHistory = async (jobId) => {
+    if (jobId === activeJobId) return;
+    clearPolling();
+    setHistoryLoading(true);
+    setError(null);
+    setJobData(null);
+    setActiveJobId(null);
+
+    try {
+      const result = await getResults(jobId);
+      jobIdRef.current = jobId;
+      setActiveJobId(jobId);
+
+      if (result.status === 'completed') {
+        setJobData(result);
+        setStatus('completed');
+        setProgressStage('completed');
+        updateJob(jobId, {
+          status: 'completed',
+          finished_at: result.finished_at,
+          total_latency_ms: result.total_latency_ms,
+        });
+      } else if (result.status === 'error') {
+        setStatus('error');
+        setProgressStage('error');
+        setError(result.error || 'Job failed');
+        updateJob(jobId, { status: 'error' });
+      } else {
+        // Still processing — resume polling
+        setStatus('processing');
+        setProgressStage(result.progress_stage || 'queued');
+        schedulePoll(jobId);
+      }
+    } catch {
+      setStatus('error');
+      setError('Job not found. The server may have restarted and the result was not saved.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const navigateToJob = (job) => {
+    // Ensure the job is in localStorage history (addJob deduplicates by job_id)
+    addJob({
+      job_id: job.job_id,
+      filename: job.filename,
+      status: job.status,
+      started_at: job.started_at,
+      finished_at: job.finished_at,
+      total_latency_ms: job.total_latency_ms,
+    });
+    setPage('home');
+    void loadJobFromHistory(job.job_id);
+  };
+
   const resetUpload = () => {
     clearPolling();
     setStatus('idle');
     setProgressStage(null);
     setError(null);
     setJobData(null);
+    setActiveJobId(null);
     jobIdRef.current = null;
+    setUploadKey(k => k + 1);
   };
 
   return (
@@ -155,12 +237,21 @@ export default function App() {
       >
         <div className="container flex items-center justify-between" style={{ padding: '0.75rem 1.5rem' }}>
           <div className="flex items-center gap-2">
+            <div className="logo-mark">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="1" y="1" width="6" height="6" rx="1" fill="white" fillOpacity="0.9"/>
+                <rect x="9" y="1" width="6" height="6" rx="1" fill="white" fillOpacity="0.6"/>
+                <rect x="1" y="9" width="6" height="6" rx="1" fill="white" fillOpacity="0.6"/>
+                <rect x="9" y="9" width="6" height="6" rx="1" fill="white" fillOpacity="0.9"/>
+              </svg>
+            </div>
             <h1
               style={{
-                fontSize: '1.25rem',
+                fontSize: '1.2rem',
                 background: 'var(--accent-gradient)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
+                letterSpacing: '-0.02em',
               }}
             >
               TableExtract
@@ -199,7 +290,12 @@ export default function App() {
                 </p>
               </div>
 
-              <FileUpload onUpload={handleUpload} disabled={status === 'uploading' || status === 'processing'} />
+              <FileUpload
+                key={uploadKey}
+                onUpload={handleUpload}
+                disabled={status === 'uploading' || status === 'processing' || historyLoading}
+              />
+
               <ProcessingStatus status={status} progressStage={progressStage} error={error} />
 
               {(status === 'completed' || status === 'error') && (
@@ -209,6 +305,14 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              <JobHistory
+                history={history}
+                activeJobId={activeJobId}
+                onLoad={loadJobFromHistory}
+                onClear={clearHistory}
+                loading={historyLoading}
+              />
             </div>
 
             {jobData && (
@@ -219,7 +323,7 @@ export default function App() {
           </>
         )}
 
-        {page === 'dashboard' && <HealthDashboard />}
+        {page === 'dashboard' && <HealthDashboard onLoadJob={navigateToJob} />}
       </main>
 
       <footer style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>

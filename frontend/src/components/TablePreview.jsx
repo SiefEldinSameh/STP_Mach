@@ -107,6 +107,7 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                       .map(cell => {
                         const key = `${cell.row}-${cell.col}`;
                         const isEditing = editingCell === key;
+                        const isHeader = ri === 0;
                         return (
                           <td
                             key={key}
@@ -115,9 +116,15 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                             onDoubleClick={() => !isSaving && startEdit(cell)}
                             style={{
                               cursor: isSaving ? 'progress' : 'pointer',
-                              background: isEditing ? 'rgba(99, 102, 241, 0.1)' : undefined,
-                              minWidth: 72,
+                              background: isEditing
+                                ? 'rgba(99, 102, 241, 0.12)'
+                                : isHeader
+                                ? 'rgba(99, 102, 241, 0.06)'
+                                : undefined,
+                              minWidth: 80,
                               verticalAlign: 'top',
+                              fontWeight: isHeader ? 600 : 400,
+                              borderLeft: isEditing ? '2px solid var(--accent-primary)' : undefined,
                             }}
                             title="Double-click to edit"
                           >
@@ -127,12 +134,8 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                                   value={editValue}
                                   onChange={event => setEditValue(event.target.value)}
                                   onKeyDown={event => {
-                                    if (event.key === 'Enter') {
-                                      void saveEdit(cell);
-                                    }
-                                    if (event.key === 'Escape') {
-                                      cancelEdit();
-                                    }
+                                    if (event.key === 'Enter') void saveEdit(cell);
+                                    if (event.key === 'Escape') cancelEdit();
                                   }}
                                   autoFocus
                                   disabled={isSaving}
@@ -141,7 +144,7 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                                 <div className="flex items-center gap-1">
                                   <button
                                     className="btn btn-success"
-                                    style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
                                     onClick={() => void saveEdit(cell)}
                                     disabled={isSaving}
                                   >
@@ -149,7 +152,7 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                                   </button>
                                   <button
                                     className="btn btn-secondary"
-                                    style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem' }}
+                                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
                                     onClick={cancelEdit}
                                     disabled={isSaving}
                                   >
@@ -158,7 +161,7 @@ export default function TablePreview({ table, pageIdx, onCellEdit }) {
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ fontSize: '0.85rem' }}>{cell.text || '—'}</span>
+                              <span style={{ fontSize: '0.85rem' }}>{cell.text || <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>—</span>}</span>
                             )}
                           </td>
                         );

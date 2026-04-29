@@ -1,6 +1,7 @@
 """Health & metrics tracking service."""
 
 from collections import deque
+import math
 import threading
 
 
@@ -8,6 +9,17 @@ def _avg(values):
     if not values:
         return 0.0
     return sum(values) / len(values)
+
+
+def _p95_ms(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    if n == 1:
+        return float(sorted_vals[0])
+    idx = max(0, min(n - 1, int(math.ceil(0.95 * n)) - 1))
+    return float(sorted_vals[idx])
 
 
 class HealthTracker:
@@ -72,6 +84,31 @@ class HealthTracker:
                 stage: round(_avg(values), 2)
                 for stage, values in self._stage_timings.items()
             }
+
+    @property
+    def stage_health_matrix(self) -> dict[str, dict]:
+        with self._lock:
+            out: dict[str, dict] = {}
+            for stage, bucket in self._stage_timings.items():
+                seq = list(bucket)
+                n = len(seq)
+                if n == 0:
+                    out[stage] = {
+                        "sample_count": 0,
+                        "avg_ms": 0.0,
+                        "min_ms": 0.0,
+                        "max_ms": 0.0,
+                        "p95_ms": 0.0,
+                    }
+                else:
+                    out[stage] = {
+                        "sample_count": n,
+                        "avg_ms": round(_avg(seq), 2),
+                        "min_ms": round(float(min(seq)), 2),
+                        "max_ms": round(float(max(seq)), 2),
+                        "p95_ms": round(_p95_ms(seq), 2),
+                    }
+            return out
 
     @property
     def recent_jobs(self) -> list[dict]:

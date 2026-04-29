@@ -26,5 +26,6 @@ async def get_health():
         average_latency_ms=round(health_tracker.average_latency_ms, 2),
         success_rate=round(health_tracker.success_rate, 2),
         stage_average_ms=health_tracker.stage_average_ms,
+        stage_health_matrix=health_tracker.stage_health_matrix,
         recent_jobs=health_tracker.recent_jobs,
     )

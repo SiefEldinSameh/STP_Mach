@@ -16,27 +16,18 @@ export default function ResultsViewer({ jobData, onCellEdit }) {
   return (
     <div className="animate-fadeIn mt-3">
       <div className="glass-card mb-2">
-        <div className="summary-grid">
+        <div className="flex items-center justify-between gap-2" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ marginBottom: '0.35rem' }}>Results</h2>
-            <p style={{ fontSize: '0.9rem' }}>
-              {filename} • {pages.length} page{pages.length !== 1 ? 's' : ''} • {totalTables} table
-              {totalTables !== 1 ? 's' : ''} • {totalCells} cell{totalCells !== 1 ? 's' : ''} • {totalLatencyMs}ms
-            </p>
-            {pageErrors > 0 && (
-              <p style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '0.4rem' }}>
-                {pageErrors} page{pageErrors !== 1 ? 's' : ''} had processing errors, but successful pages are still available.
-              </p>
-            )}
+            <h2 style={{ marginBottom: '0.2rem' }}>Results</h2>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{filename}</p>
           </div>
-
           <div className="actions-row">
             {hasTables ? (
               <>
-                <a href={getCsvUrl(jobId, 'matrix')} download className="btn btn-primary">
+                <a href={getCsvUrl(jobId, 'matrix')} download className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1.1rem' }}>
                   Download CSV
                 </a>
-                <a href={getCropsUrl(jobId)} download className="btn btn-secondary">
+                <a href={getCropsUrl(jobId)} download className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '0.5rem 1.1rem' }}>
                   Download Crops
                 </a>
               </>
@@ -45,6 +36,31 @@ export default function ResultsViewer({ jobData, onCellEdit }) {
             )}
           </div>
         </div>
+
+        <div className="stat-grid">
+          <div className="stat-card">
+            <div className="stat-value">{pages.length}</div>
+            <div className="stat-label">Pages</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{totalTables}</div>
+            <div className="stat-label">Tables</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{totalCells}</div>
+            <div className="stat-label">Cells</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ fontSize: '1.2rem' }}>{totalLatencyMs}ms</div>
+            <div className="stat-label">Latency</div>
+          </div>
+        </div>
+
+        {pageErrors > 0 && (
+          <p style={{ fontSize: '0.8rem', color: 'var(--warning)', marginTop: '0.75rem' }}>
+            {pageErrors} page{pageErrors !== 1 ? 's' : ''} had processing errors — successful pages are still available.
+          </p>
+        )}
       </div>
 
       {!hasTables && (

@@ -60,6 +60,10 @@ html {
 body {
   font-family: var(--font-family);
   background: var(--bg-primary);
+  background-image:
+    radial-gradient(ellipse at 15% 40%, rgba(99, 102, 241, 0.09) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 15%, rgba(139, 92, 246, 0.07) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 90%, rgba(99, 102, 241, 0.05) 0%, transparent 45%);
   color: var(--text-primary);
   min-height: 100vh;
   transition: var(--transition);
@@ -183,6 +187,10 @@ input:focus, textarea:focus {
   text-transform: uppercase;
   font-size: 0.75rem;
   letter-spacing: 0.05em;
+  background: var(--bg-card);
+}
+.data-table tbody tr:nth-child(even) td {
+  background: rgba(99, 102, 241, 0.025);
 }
 .data-table tr:hover td {
   background: var(--bg-card-hover);
@@ -385,4 +393,225 @@ input:focus, textarea:focus {
   .actions-row {
     justify-content: flex-start;
   }
+}
+
+/* ── Job History ─────────────────────────────────────────────────────────── */
+.history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-glass);
+  background: transparent;
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+}
+
+.history-row:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.history-row[data-active="true"] {
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.07);
+}
+
+.history-row:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.history-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.history-filename {
+  font-size: 0.84rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.history-meta {
+  font-size: 0.71rem;
+  color: var(--text-muted);
+}
+
+/* ── Pipeline Stepper ────────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+}
+
+.stepper-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 64px;
+  position: relative;
+}
+
+.stepper-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
+  height: 2px;
+  background: var(--border-glass);
+  z-index: 0;
+  transition: background 0.4s ease;
+}
+
+.stepper-step.done:not(:last-child)::after {
+  background: var(--success);
+}
+
+.stepper-step.active:not(:last-child)::after {
+  background: linear-gradient(90deg, var(--accent-primary), var(--border-glass));
+}
+
+.stepper-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border-glass);
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  position: relative;
+  z-index: 1;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.stepper-step.done .stepper-dot {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+
+.stepper-step.active .stepper-dot {
+  background: var(--accent-gradient);
+  border-color: var(--accent-primary);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+  animation: stepPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes stepPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2); }
+  50%       { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.08); }
+}
+
+.stepper-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+  text-align: center;
+  white-space: nowrap;
+  transition: color 0.3s;
+}
+
+.stepper-step.active .stepper-label {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.stepper-step.done .stepper-label {
+  color: var(--success);
+}
+
+/* ── Stat Cards ──────────────────────────────────────────────────────────── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 0.75rem;
+}
+
+.stat-card {
+  text-align: center;
+  padding: 0.85rem 0.5rem;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.1;
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+}
+
+/* ── Logo mark ───────────────────────────────────────────────────────────── */
+.logo-mark {
+  width: 30px;
+  height: 30px;
+  background: var(--accent-gradient);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+/* ── Upload icon ─────────────────────────────────────────────────────────── */
+.upload-icon {
+  color: var(--accent-primary);
+  opacity: 0.85;
+  transition: var(--transition);
+}
+
+.drag-active .upload-icon {
+  opacity: 1;
+  transform: translateY(-4px);
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--accent-primary);
+  font-weight: 500;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
