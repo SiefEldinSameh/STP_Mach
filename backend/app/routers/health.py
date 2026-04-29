@@ -18,6 +18,7 @@ async def get_health():
     return HealthResponse(
         status="healthy",
         models_loaded=model_store.is_loaded,
+        model_load_error=(model_store.load_error if not model_store.is_loaded else None),
         device=str(DEVICE),
         total_requests=health_tracker.total_requests,
         successful_requests=health_tracker.successful_requests,

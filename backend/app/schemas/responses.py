@@ -83,6 +83,7 @@ class RecentJob(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     models_loaded: bool
+    model_load_error: Optional[str] = None
     device: str
     total_requests: int
     successful_requests: int

@@ -7,6 +7,7 @@ import gc
 import json
 import logging
 from pathlib import Path
+from typing import List, Optional
 
 import torch
 from safetensors.torch import load_file
@@ -28,6 +29,46 @@ from app.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def validate_checkpoint_paths() -> None:
+    """Verify local checkpoints exist before loading (clear errors vs NoneType downstream)."""
+    errs: List[str] = []
+
+    def tt_require(name: str, root: Path) -> None:
+        root = root.resolve()
+        if not root.is_dir():
+            errs.append(f"{name}: directory missing - {root}")
+            return
+        for fn in ("config.json", "model.safetensors"):
+            if not (root / fn).is_file():
+                errs.append(f"{name}: missing file '{fn}' - {root}")
+        has_preprocessor = (
+            (root / "preprocessor_config.json").is_file() or (root / "preprocessor.json").is_file()
+        )
+        if not has_preprocessor:
+            errs.append(
+                f"{name}: AutoImageProcessor needs preprocessor_config.json (or preprocessor.json) - {root}"
+            )
+
+    tt_require("TD", Path(TD_CHECKPOINT))
+    tt_require("TSR", Path(TSR_CHECKPOINT))
+
+    oc = Path(TROCR_CHECKPOINT).resolve()
+    if not oc.is_dir():
+        errs.append(f"OCR: directory missing - {oc}")
+    else:
+        if not (oc / "config.json").is_file():
+            errs.append(f"OCR: missing config.json - {oc}")
+        has_weights = bool(list(oc.glob("*.safetensors"))) or (
+            oc / "pytorch_model.bin").is_file()
+        if not has_weights:
+            errs.append(
+                f"OCR: no weights (expect *.safetensors or pytorch_model.bin) - {oc}"
+            )
+
+    if errs:
+        raise FileNotFoundError("; ".join(errs))
 
 
 def remap_detr_to_hf(raw: dict) -> dict:
@@ -117,6 +158,12 @@ def remap_detr_to_hf(raw: dict) -> dict:
     return hf
 
 
+def _patch_table_transformer_config_dict(config_data: dict) -> None:
+    """In-place fixes for checkpoints whose config.json uses null where strict configs expect types."""
+    if config_data.get("dilation") is None:
+        config_data["dilation"] = False
+
+
 def _load_table_transformer_model(
     checkpoint_dir: str,
     *,
@@ -129,6 +176,7 @@ def _load_table_transformer_model(
     if patch_config:
         # The local checkpoint works offline only when backbone kwargs are normalized.
         config_data["backbone_kwargs"] = {}
+    _patch_table_transformer_config_dict(config_data)
 
     config = TableTransformerConfig(**config_data)
     model = TableTransformerForObjectDetection(config)
@@ -149,72 +197,107 @@ class ModelStore:
         self.gen_cfg = None
         self.device = DEVICE
         self._loaded = False
+        self.load_error: Optional[str] = None
 
     @property
     def is_loaded(self):
         return self._loaded
 
-    def load(self):
+    def _reset_models(self) -> None:
+        self.td_model = None
+        self.td_proc = None
+        self.tsr_model = None
+        self.tsr_proc = None
+        self.ocr_model = None
+        self.ocr_proc = None
+        self.gen_cfg = None
+        self._loaded = False
+
+    def load(self) -> bool:
+        """Load TD, TSR, TrOCR. Returns True on success. On failure, sets load_error."""
         if self._loaded:
-            return
+            return True
+
+        self._reset_models()
+        self.load_error = None
+
+        td_r = Path(TD_CHECKPOINT).resolve()
+        tsr_r = Path(TSR_CHECKPOINT).resolve()
+        oc_r = Path(TROCR_CHECKPOINT).resolve()
         logger.info("Loading models on device: %s", self.device)
+        logger.info("Checkpoint paths resolved: TD=%s TSR=%s OCR=%s", td_r, tsr_r, oc_r)
 
-        logger.info("Loading TD (Table Detection)...")
-        self.td_proc = AutoImageProcessor.from_pretrained(TD_CHECKPOINT, local_files_only=True)
-        raw_sd = load_file(f"{TD_CHECKPOINT}/model.safetensors")
-        hf_sd = remap_detr_to_hf(raw_sd)
-        self.td_model, missing, unexpected = _load_table_transformer_model(
-            TD_CHECKPOINT,
-            state_dict=hf_sd,
-        )
-        logger.info("TD: missing=%d, unexpected=%d", len(missing), len(unexpected))
-        self.td_model = self.td_model.to(self.device).eval()
-        logger.info("TD labels: %s", self.td_model.config.id2label)
+        try:
+            validate_checkpoint_paths()
+        except Exception as exc:
+            self.load_error = f"{type(exc).__name__}: {exc}"
+            logger.error("Checkpoint validation failed: %s", self.load_error)
+            return False
 
-        logger.info("Loading TSR (Table Structure Recognition)...")
-        self.tsr_proc = AutoImageProcessor.from_pretrained(TSR_CHECKPOINT, local_files_only=True)
-        self.tsr_proc.size = {"shortest_edge": 800, "longest_edge": 1000}
-        tsr_sd = load_file(f"{TSR_CHECKPOINT}/model.safetensors")
-        self.tsr_model, missing, unexpected = _load_table_transformer_model(
-            TSR_CHECKPOINT,
-            state_dict=tsr_sd,
-        )
-        logger.info("TSR: missing=%d, unexpected=%d", len(missing), len(unexpected))
-        self.tsr_model.config.id2label = {
-            0: "table",
-            1: "table column",
-            2: "table row",
-            3: "table column header",
-            4: "table projected row header",
-            5: "table spanning cell",
-            6: "no object",
-        }
-        self.tsr_model.config.label2id = {
-            value: key for key, value in self.tsr_model.config.id2label.items()
-        }
-        self.tsr_model = self.tsr_model.to(self.device).eval()
-        logger.info("TSR labels: %s", self.tsr_model.config.id2label)
+        try:
+            logger.info("Loading TD (Table Detection)...")
+            self.td_proc = AutoImageProcessor.from_pretrained(TD_CHECKPOINT, local_files_only=True)
+            raw_sd = load_file(str(Path(TD_CHECKPOINT) / "model.safetensors"))
+            hf_sd = remap_detr_to_hf(raw_sd)
+            self.td_model, missing, unexpected = _load_table_transformer_model(
+                TD_CHECKPOINT,
+                state_dict=hf_sd,
+            )
+            logger.info("TD: missing=%d, unexpected=%d", len(missing), len(unexpected))
+            self.td_model = self.td_model.to(self.device).eval()
+            logger.info("TD labels: %s", self.td_model.config.id2label)
 
-        logger.info("Loading TrOCR (OCR)...")
-        self.ocr_proc = TrOCRProcessor.from_pretrained(TROCR_CHECKPOINT, local_files_only=True)
-        self.ocr_model = (
-            VisionEncoderDecoderModel.from_pretrained(TROCR_CHECKPOINT, local_files_only=True)
-            .to(self.device)
-            .eval()
-        )
-        self.gen_cfg = GenerationConfig(
-            max_new_tokens=MAX_TEXT_LEN,
-            num_beams=1,
-            no_repeat_ngram_size=3,
-        )
-        logger.info("TrOCR ready")
+            logger.info("Loading TSR (Table Structure Recognition)...")
+            self.tsr_proc = AutoImageProcessor.from_pretrained(TSR_CHECKPOINT, local_files_only=True)
+            self.tsr_proc.size = {"shortest_edge": 800, "longest_edge": 1000}
+            tsr_sd = load_file(str(Path(TSR_CHECKPOINT) / "model.safetensors"))
+            self.tsr_model, missing, unexpected = _load_table_transformer_model(
+                TSR_CHECKPOINT,
+                state_dict=tsr_sd,
+            )
+            logger.info("TSR: missing=%d, unexpected=%d", len(missing), len(unexpected))
+            self.tsr_model.config.id2label = {
+                0: "table",
+                1: "table column",
+                2: "table row",
+                3: "table column header",
+                4: "table projected row header",
+                5: "table spanning cell",
+                6: "no object",
+            }
+            self.tsr_model.config.label2id = {
+                value: key for key, value in self.tsr_model.config.id2label.items()
+            }
+            self.tsr_model = self.tsr_model.to(self.device).eval()
+            logger.info("TSR labels: %s", self.tsr_model.config.id2label)
 
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            logger.info("Loading TrOCR (OCR)...")
+            self.ocr_proc = TrOCRProcessor.from_pretrained(TROCR_CHECKPOINT, local_files_only=True)
+            self.ocr_model = (
+                VisionEncoderDecoderModel.from_pretrained(TROCR_CHECKPOINT, local_files_only=True)
+                .to(self.device)
+                .eval()
+            )
+            self.gen_cfg = GenerationConfig(
+                max_new_tokens=MAX_TEXT_LEN,
+                num_beams=1,
+                no_repeat_ngram_size=3,
+            )
+            logger.info("TrOCR ready")
 
-        self._loaded = True
-        logger.info("All models loaded and ready on %s", self.device)
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            self._loaded = True
+            self.load_error = None
+            logger.info("All models loaded and ready on %s", self.device)
+            return True
+        except Exception as exc:
+            self.load_error = f"{type(exc).__name__}: {exc}"
+            logger.exception("Model loading failed.")
+            self._reset_models()
+            return False
 
 
 model_store = ModelStore()

@@ -7,7 +7,8 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
-from app.config import ALLOWED_EXTENSIONS, UPLOAD_DIR
+from app.config import ALLOWED_EXTENSIONS, TD_CHECKPOINT, TROCR_CHECKPOINT, TSR_CHECKPOINT, UPLOAD_DIR
+from app.models.loader import model_store
 from app.schemas.responses import UploadResponse
 from app.services.processing import submit_job
 
@@ -17,6 +18,18 @@ router = APIRouter(prefix="/api", tags=["upload"])
 @router.post("/upload", response_model=UploadResponse)
 async def upload_file(file: UploadFile = File(...)):
     """Upload an image or PDF for table extraction."""
+    if not model_store.is_loaded:
+        detail = (
+            model_store.load_error
+            or "Models are not loaded. Install deps (pip install timm), place weights under ckpts/td, ckpts/tsr, ckpts/ocr, and restart."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{detail} Checkpoint dirs: TD={TD_CHECKPOINT} TSR={TSR_CHECKPOINT} OCR={TROCR_CHECKPOINT}"
+            ),
+        )
+
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(

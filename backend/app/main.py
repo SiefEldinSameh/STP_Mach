@@ -25,11 +25,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Load models on startup, cleanup on shutdown."""
     logger.info("Starting up — loading models…")
-    try:
-        model_store.load()
+    if model_store.load():
         logger.info("Models loaded successfully.")
-    except Exception:
-        logger.exception("Failed to load models. The API will start but inference will fail.")
+    else:
+        logger.error(
+            "Models did not load (inference disabled). Reason: %s",
+            model_store.load_error or "(unknown)",
+        )
     yield
     logger.info("Shutting down.")
 

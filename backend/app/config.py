@@ -1,14 +1,26 @@
 """
 Configuration for the table extraction pipeline.
 All model paths, thresholds, and runtime settings.
+
+Checkpoint root defaults to ``<backend>/ckpts``. Override with env ``STP_MACH_CKPTS``
+(absolute path) if weights live elsewhere (e.g. Docker volume).
 """
 
 import os
+from pathlib import Path
+
 import torch
 
-# ── Base Paths ────────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CKPTS_DIR = os.path.join(BASE_DIR, "ckpts")
+# ── Base Paths (always resolved; independent of process cwd) ─────────────────
+_BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = str(_BASE_DIR)
+
+_CKPT_OVERRIDE = os.environ.get("STP_MACH_CKPTS", "").strip()
+CKPTS_DIR = (
+    str(Path(_CKPT_OVERRIDE).resolve())
+    if _CKPT_OVERRIDE
+    else str(_BASE_DIR / "ckpts")
+)
 
 TD_CHECKPOINT = os.path.join(CKPTS_DIR, "td")
 TSR_CHECKPOINT = os.path.join(CKPTS_DIR, "tsr")
@@ -17,8 +29,8 @@ TROCR_CHECKPOINT = os.path.join(CKPTS_DIR, "ocr")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+for _path in (TD_CHECKPOINT, TSR_CHECKPOINT, TROCR_CHECKPOINT, UPLOAD_DIR, OUTPUT_DIR):
+    os.makedirs(_path, exist_ok=True)
 
 # ── Detection Thresholds ─────────────────────────────────────────────────────
 TD_CONF = 0.65       # table-detection confidence

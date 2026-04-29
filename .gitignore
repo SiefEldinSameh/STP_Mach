@@ -52,7 +52,7 @@ yarn-error.log*
 *.swo
 
 # Project specific
-backend/ckpts/
+# (ckpts/ layout is tracked; weight blobs still ignored via *.safetensors, *.bin, etc.)
 backend/uploads/
 backend/outputs/
 *.log

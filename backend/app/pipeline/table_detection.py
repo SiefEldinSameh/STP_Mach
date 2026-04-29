@@ -10,6 +10,9 @@ from app.models.loader import model_store
 @torch.no_grad()
 def run_td(page):
     """Detect tables in a PIL image. Returns sorted list of [x1,y1,x2,y2] boxes."""
+    if model_store.td_model is None or model_store.td_proc is None:
+        err = getattr(model_store, "load_error", None) or "TD model not initialized"
+        raise RuntimeError(err)
     W, H = page.size
     td_proc = model_store.td_proc
     td_model = model_store.td_model
