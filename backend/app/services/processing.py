@@ -343,7 +343,9 @@ def generate_csv_for_result(result: dict, csv_format: str = "matrix") -> Optiona
 
 
 def _export_promo_text() -> str:
-    msg = "Want up to 10× faster processing? Subscribe with us for marketing updates."
+    msg = (
+        "If you want faster or up to 10× faster processing, subscribe with us for marketing updates."
+    )
     if SUBSCRIBE_URL:
         return f"{msg} {SUBSCRIBE_URL}"
     return msg

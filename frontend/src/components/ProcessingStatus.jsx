@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import { SUBSCRIBE_URL } from '../api/client';
+
 const STAGES = [
   { key: 'queued',           label: 'Queued',     short: '⏳' },
   { key: 'loading',          label: 'Preparing',  short: '⚙' },
@@ -41,10 +44,77 @@ function PipelineStepper({ progressStage }) {
 }
 
 export default function ProcessingStatus({ status, progressStage, error }) {
+  const [promoDismissed, setPromoDismissed] = useState(false);
+
+  useEffect(() => {
+    if (status === 'uploading') {
+      setPromoDismissed(false);
+    }
+  }, [status]);
+
   if (status === 'idle') return null;
+
+  const showPromoBanner = (status === 'uploading' || status === 'processing') && !promoDismissed;
 
   return (
     <div className="glass-card animate-fadeIn mt-3" style={{ textAlign: 'center', padding: '2rem' }}>
+      {showPromoBanner && (
+        <div
+          className="flex items-start justify-between gap-2"
+          style={{
+            marginBottom: '1rem',
+            padding: '0.85rem 1rem',
+            borderRadius: '12px',
+            border: '1px solid var(--border-glass)',
+            background: 'linear-gradient(135deg, rgba(125, 211, 252, 0.08) 0%, rgba(167, 139, 250, 0.06) 100%)',
+            textAlign: 'left',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06)',
+          }}
+        >
+          <div className="flex items-start gap-2" style={{ minWidth: 0 }}>
+            <span aria-hidden style={{ flexShrink: 0, fontSize: '1.15rem', lineHeight: 1 }}>
+              ✨
+            </span>
+            <div>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  marginBottom: '0.4rem',
+                  letterSpacing: '-0.01em',
+                  background: 'var(--accent-gradient)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                }}
+              >
+                Unlock faster runs — up to 10×
+              </div>
+              <p style={{ margin: 0, lineHeight: 1.5, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Subscribe with us for marketing updates and tips to speed up your next extraction.
+                {SUBSCRIBE_URL ? (
+                  <>
+                    {' '}
+                    <a href={SUBSCRIBE_URL} target="_blank" rel="noreferrer noopener" className="btn btn-primary" style={{ fontSize: '0.78rem', padding: '0.2rem 0.65rem', marginLeft: '0.35rem', display: 'inline-block', verticalAlign: 'middle' }}>
+                      Subscribe
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setPromoDismissed(true)}
+            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', flexShrink: 0, opacity: 0.85 }}
+            aria-label="Dismiss offer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {status === 'uploading' && (
         <>
           <div className="spinner" style={{ margin: '0 auto 1rem' }} />

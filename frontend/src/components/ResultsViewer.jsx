@@ -1,11 +1,9 @@
-import { useState } from 'react';
 import TablePreview from './TablePreview';
-import { getCropsUrl, getCsvUrl, getXlsxUrl, SUBSCRIBE_URL } from '../api/client';
+import { getCropsUrl, getCsvUrl, getXlsxUrl } from '../api/client';
 
 export default function ResultsViewer({ jobData, onCellEdit }) {
   if (!jobData?.pages) return null;
 
-  const [promoDismissed, setPromoDismissed] = useState(false);
   const { job_id: jobId, filename, pages, total_latency_ms: totalLatencyMs } = jobData;
   const totalTables = pages.reduce((sum, page) => sum + (page.tables?.length || 0), 0);
   const totalCells = pages.reduce(
@@ -42,42 +40,6 @@ export default function ResultsViewer({ jobData, onCellEdit }) {
             )}
           </div>
         </div>
-
-        {hasTables && !promoDismissed && (
-          <div
-            className="flex items-start justify-between gap-2"
-            style={{
-              marginTop: '0.85rem',
-              padding: '0.65rem 0.85rem',
-              borderRadius: '8px',
-              background: 'var(--surface-elevated, rgba(255,255,255,0.06))',
-              border: '1px solid var(--border-subtle, rgba(255,255,255,0.12))',
-              fontSize: '0.8rem',
-              color: 'var(--text-muted)',
-            }}
-          >
-            <p style={{ margin: 0, lineHeight: 1.45 }}>
-              Want up to 10× faster processing? Subscribe with us for marketing updates.
-              {SUBSCRIBE_URL ? (
-                <>
-                  {' '}
-                  <a href={SUBSCRIBE_URL} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--accent, #7dd3fc)' }}>
-                    Subscribe
-                  </a>
-                </>
-              ) : null}
-            </p>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setPromoDismissed(true)}
-              style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem', flexShrink: 0 }}
-              aria-label="Dismiss"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
 
         <div className="stat-grid">
           <div className="stat-card">
