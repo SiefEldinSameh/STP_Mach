@@ -47,6 +47,12 @@ export function getCsvUrl(jobId, format = 'matrix') {
   return `${API_BASE}/results/${jobId}/csv?format=${encodeURIComponent(format)}`;
 }
 
+export function getXlsxUrl(jobId, format = 'matrix') {
+  return `${API_BASE}/results/${jobId}/xlsx?format=${encodeURIComponent(format)}`;
+}
+
+export const SUBSCRIBE_URL = (import.meta.env.VITE_SUBSCRIBE_URL || '').trim();
+
 export function getCropsUrl(jobId) {
   return `${API_BASE}/results/${jobId}/crops`;
 }

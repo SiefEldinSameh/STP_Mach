@@ -2,15 +2,17 @@
 Results router - get/edit job results and download exports.
 """
 
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 
 from app.schemas.responses import EditRequest, JobStatus
 from app.services.processing import (
     generate_crops_zip,
     generate_csv_for_result,
+    generate_xlsx_for_result,
     get_job,
     job_has_tables,
     update_job_cell,
@@ -74,7 +76,7 @@ async def download_csv(
     if not job_has_tables(job_id):
         raise HTTPException(status_code=400, detail="No tables detected for this job")
 
-    csv_content = generate_csv_for_result(job["result"], csv_format=csv_format)
+    csv_content = await asyncio.to_thread(generate_csv_for_result, job["result"], csv_format)
     if csv_content is None:
         raise HTTPException(status_code=500, detail="Failed to generate CSV")
 
@@ -83,6 +85,33 @@ async def download_csv(
     return PlainTextResponse(
         content=csv_content,
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/results/{job_id}/xlsx")
+async def download_xlsx(
+    job_id: str,
+    xlsx_format: Literal["matrix", "cells"] = Query("matrix", alias="format"),
+):
+    """Download the final Excel workbook for a completed job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed yet")
+    if not job_has_tables(job_id):
+        raise HTTPException(status_code=400, detail="No tables detected for this job")
+
+    xlsx_bytes = await asyncio.to_thread(generate_xlsx_for_result, job["result"], xlsx_format)
+    if xlsx_bytes is None:
+        raise HTTPException(status_code=500, detail="Failed to generate Excel")
+
+    suffix = "cells" if xlsx_format == "cells" else "tables"
+    filename = (job.get("filename") or "results").rsplit(".", 1)[0] + f"-{suffix}.xlsx"
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -98,7 +127,7 @@ async def download_crops(job_id: str):
     if not job_has_tables(job_id):
         raise HTTPException(status_code=400, detail="No tables detected for this job")
 
-    archive = generate_crops_zip(job_id)
+    archive = await asyncio.to_thread(generate_crops_zip, job_id)
     if archive is None:
         raise HTTPException(status_code=500, detail="Failed to package table crops")
 

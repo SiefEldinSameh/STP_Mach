@@ -5,6 +5,7 @@ Upload router — handles file uploads and starts async processing.
 import os
 import uuid
 
+import aiofiles
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from app.config import ALLOWED_EXTENSIONS, TD_CHECKPOINT, TROCR_CHECKPOINT, TSR_CHECKPOINT, UPLOAD_DIR
@@ -40,9 +41,13 @@ async def upload_file(file: UploadFile = File(...)):
     # Save uploaded file
     file_id = str(uuid.uuid4())
     save_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
-    content = await file.read()
-    with open(save_path, "wb") as f:
-        f.write(content)
+    async with aiofiles.open(save_path, "wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            await f.write(chunk)
+    await file.close()
 
     # Submit for async processing
     job_id = await submit_job(save_path, os.path.basename(file.filename or save_path))

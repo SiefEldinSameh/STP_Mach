@@ -93,6 +93,10 @@ class HealthResponse(BaseModel):
     models_loaded: bool
     model_load_error: Optional[str] = None
     device: str
+    processing_max_workers: int
+    processing_active_jobs: int
+    processing_queued_jobs: int
+    processing_tracked_jobs: int
     total_requests: int
     successful_requests: int
     failed_requests: int

@@ -51,8 +51,17 @@ OCR_BATCH = 32
 
 # ── Device ───────────────────────────────────────────────────────────────────
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+PROCESSING_MAX_WORKERS = int(
+    os.environ.get(
+        "STP_MACH_MAX_WORKERS",
+        "1" if DEVICE.type == "cuda" else str(min(4, os.cpu_count() or 2)),
+    )
+)
 
 # ── Image Extensions ─────────────────────────────────────────────────────────
 IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 PDF_EXTENSIONS = (".pdf",)
 ALLOWED_EXTENSIONS = IMG_EXTENSIONS + PDF_EXTENSIONS
+
+# Optional URL shown in Excel export promo (Info sheet) and can be mirrored in the frontend.
+SUBSCRIBE_URL = os.environ.get("STP_MACH_SUBSCRIBE_URL", "").strip()

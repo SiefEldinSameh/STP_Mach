@@ -3,6 +3,7 @@ Async job management - runs heavy inference in background threads.
 """
 
 import asyncio
+import copy
 import csv
 import io
 import json
@@ -11,19 +12,25 @@ import os
 import threading
 import uuid
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 
-from app.config import OUTPUT_DIR
+from openpyxl import Workbook
+
+from app.config import OUTPUT_DIR, PROCESSING_MAX_WORKERS, SUBSCRIBE_URL
 from app.pipeline.inference import run_pipeline
 from app.services.health import health_tracker
 
 logger = logging.getLogger(__name__)
 
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(
+    max_workers=max(1, PROCESSING_MAX_WORKERS),
+    thread_name_prefix="table-extract",
+)
 _jobs: Dict[str, dict] = {}
+_job_futures: Dict[str, Future] = {}
 _jobs_lock = threading.Lock()
 
 
@@ -38,6 +45,34 @@ def _set_job_fields(job_id: str, **fields):
             job.update(fields)
 
 
+def _get_job_field(job_id: str, field: str):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        return job.get(field)
+
+
+def _snapshot_job_in_memory(job_id: str) -> Optional[dict]:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        return copy.deepcopy(job)
+
+
+def _register_job_future(job_id: str, future: Future) -> None:
+    with _jobs_lock:
+        _job_futures[job_id] = future
+
+
+def _cleanup_finished_futures() -> None:
+    with _jobs_lock:
+        finished = [job_id for job_id, future in _job_futures.items() if future.done()]
+        for job_id in finished:
+            _job_futures.pop(job_id, None)
+
+
 def _has_tables(result: Optional[dict]) -> bool:
     if not result:
         return False
@@ -48,7 +83,9 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
     """Synchronous wrapper for the pipeline - runs in a worker thread."""
     try:
         _set_job_fields(job_id, progress_stage="loading")
-        output_dir = _jobs[job_id]["output_dir"]
+        output_dir = _get_job_field(job_id, "output_dir")
+        if not output_dir:
+            raise RuntimeError(f"Job {job_id} is missing an output directory")
         result = run_pipeline(
             file_path,
             output_dir=output_dir,
@@ -65,7 +102,7 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
             progress_stage="completed",
             stage_timings_ms=result.get("stage_timings_ms", {}),
         )
-        completed_job = _jobs[job_id]
+        completed_job = _snapshot_job_in_memory(job_id)
         _save_job_to_disk(job_id, completed_job)
         health_tracker.record_request(
             result["total_latency_ms"],
@@ -91,7 +128,7 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
             finished_at=_utc_now(),
             progress_stage="error",
         )
-        failed_job = _jobs.get(job_id, {})
+        failed_job = _snapshot_job_in_memory(job_id) or {}
         _save_job_to_disk(job_id, failed_job)
         health_tracker.record_request(
             0,
@@ -112,6 +149,7 @@ def _run_inference_sync(job_id: str, file_path: str, original_filename: str):
 
 async def submit_job(file_path: str, original_filename: str) -> str:
     """Submit a file for async processing. Returns job_id."""
+    _cleanup_finished_futures()
     job_id = str(uuid.uuid4())
     output_dir = os.path.join(OUTPUT_DIR, job_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -131,8 +169,9 @@ async def submit_job(file_path: str, original_filename: str) -> str:
             "stage_timings_ms": {},
         }
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(_executor, _run_inference_sync, job_id, file_path, original_filename)
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(_executor, _run_inference_sync, job_id, file_path, original_filename)
+    _register_job_future(job_id, future)
     return job_id
 
 
@@ -187,10 +226,31 @@ def _load_job_from_disk(job_id: str) -> Optional[dict]:
 
 def get_job(job_id: str) -> Optional[dict]:
     """Get job by ID — checks memory first, then falls back to disk."""
-    job = _jobs.get(job_id)
+    job = _snapshot_job_in_memory(job_id)
     if job is not None:
         return job
     return _load_job_from_disk(job_id)
+
+
+def get_processing_runtime() -> dict[str, int]:
+    """Return thread-pool activity for health/debugging."""
+    _cleanup_finished_futures()
+    with _jobs_lock:
+        processing_jobs = [job for job in _jobs.values() if job.get("status") == "processing"]
+        queued = sum(1 for job in processing_jobs if job.get("progress_stage") == "queued")
+        active = max(0, len(processing_jobs) - queued)
+        tracked = len(_job_futures)
+
+    return {
+        "max_workers": _executor._max_workers,
+        "active_jobs": active,
+        "queued_jobs": queued,
+        "tracked_jobs": tracked,
+    }
+
+
+def shutdown_processing_executor() -> None:
+    _executor.shutdown(wait=False, cancel_futures=False)
 
 
 def update_job_cell(job_id: str, page: int, table_id: int, row: int, col: int, text: str) -> bool:
@@ -199,7 +259,8 @@ def update_job_cell(job_id: str, page: int, table_id: int, row: int, col: int, t
     if not job or job["status"] != "completed" or not job["result"]:
         return False
 
-    from_disk = job_id not in _jobs
+    with _jobs_lock:
+        from_disk = job_id not in _jobs
 
     for page_data in job["result"].get("pages", []):
         if page_data["page"] != page:
@@ -279,6 +340,76 @@ def generate_csv_for_result(result: dict, csv_format: str = "matrix") -> Optiona
             writer.writerow([])
 
     return output.getvalue()
+
+
+def _export_promo_text() -> str:
+    msg = "Want up to 10× faster processing? Subscribe with us for marketing updates."
+    if SUBSCRIBE_URL:
+        return f"{msg} {SUBSCRIBE_URL}"
+    return msg
+
+
+def _safe_excel_sheet_title(raw: str, max_len: int = 31) -> str:
+    invalid = r"[]*?:\/\\"
+    s = "".join("_" if c in invalid else c for c in raw).strip() or "Sheet"
+    return s[:max_len]
+
+
+def generate_xlsx_for_result(
+    result: dict, xlsx_format: Literal["matrix", "cells"] = "matrix"
+) -> Optional[bytes]:
+    if not _has_tables(result):
+        return None
+
+    wb = Workbook()
+
+    if xlsx_format == "cells":
+        ws = wb.active
+        ws.title = "Cells"
+        ws.append(["page", "table_id", "row", "col", "rowspan", "colspan", "text"])
+        for page_data in result.get("pages", []):
+            for table in page_data.get("tables", []):
+                for cell in table.get("cells", []):
+                    ws.append(
+                        [
+                            page_data["page"],
+                            table["table_id"],
+                            cell["row"],
+                            cell["col"],
+                            cell["rowspan"],
+                            cell["colspan"],
+                            cell.get("text", ""),
+                        ]
+                    )
+    else:
+        table_index = 0
+        for page_data in result.get("pages", []):
+            for table in page_data.get("tables", []):
+                title = _safe_excel_sheet_title(f"Table {table_index}")
+                if table_index == 0:
+                    ws = wb.active
+                    ws.title = title
+                else:
+                    ws = wb.create_sheet(title)
+                for cell in table.get("cells", []):
+                    r = cell["row"] + 1
+                    c = cell["col"] + 1
+                    rs = max(1, int(cell.get("rowspan", 1)))
+                    cs = max(1, int(cell.get("colspan", 1)))
+                    ws.cell(row=r, column=c, value=cell.get("text", ""))
+                    if rs > 1 or cs > 1:
+                        ws.merge_cells(
+                            start_row=r,
+                            start_column=c,
+                            end_row=r + rs - 1,
+                            end_column=c + cs - 1,
+                        )
+                table_index += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def generate_crops_zip(job_id: str) -> Optional[io.BytesIO]:

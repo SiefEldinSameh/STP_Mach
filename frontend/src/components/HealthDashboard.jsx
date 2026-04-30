@@ -10,7 +10,62 @@ function formatStageLabel(stage) {
     .join(' ');
 }
 
-export default function HealthDashboard({ onLoadJob }) {
+function sortJobsByNewest(a, b) {
+  const aTime = new Date(a.finished_at || a.started_at || 0).getTime();
+  const bTime = new Date(b.finished_at || b.started_at || 0).getTime();
+  return bTime - aTime;
+}
+
+function mergeJobs(serverJobs, localJobs) {
+  const merged = new Map();
+
+  [...serverJobs, ...localJobs].forEach(job => {
+    if (!job?.job_id) return;
+
+    const existing = merged.get(job.job_id);
+    if (!existing) {
+      merged.set(job.job_id, { ...job });
+      return;
+    }
+
+    merged.set(job.job_id, {
+      ...existing,
+      ...job,
+      status: job.status || existing.status,
+      filename: job.filename || existing.filename,
+      total_latency_ms: job.total_latency_ms ?? existing.total_latency_ms,
+      started_at: job.started_at || existing.started_at,
+      finished_at: job.finished_at || existing.finished_at,
+      error: job.error || existing.error,
+    });
+  });
+
+  return Array.from(merged.values()).sort(sortJobsByNewest);
+}
+
+function summarizeJob(jobData) {
+  if (!jobData?.pages) {
+    return { pages: 0, tables: 0, cells: 0 };
+  }
+
+  return {
+    pages: jobData.pages.length,
+    tables: jobData.pages.reduce((sum, page) => sum + (page.tables?.length || 0), 0),
+    cells: jobData.pages.reduce(
+      (sum, page) => sum + (page.tables?.reduce((tableSum, table) => tableSum + (table.cells?.length || 0), 0) || 0),
+      0
+    ),
+  };
+}
+
+export default function HealthDashboard({
+  onLoadJob,
+  history = [],
+  activeJobId = null,
+  activeJobData = null,
+  activeStatus = 'idle',
+  onOpenExtract,
+}) {
   const [health, setHealth] = useState(null);
   const [error, setError] = useState(null);
 
@@ -56,31 +111,79 @@ export default function HealthDashboard({ onLoadJob }) {
     );
   }
 
-  const stageEntries = Object.entries(health.stage_average_ms || {}).sort(
-    (a, b) => {
-      const ia = STAGE_ORDER.indexOf(a[0]);
-      const ib = STAGE_ORDER.indexOf(b[0]);
-      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-    }
-  );
+  const stageEntries = Object.entries(health.stage_average_ms || {}).sort((a, b) => {
+    const ia = STAGE_ORDER.indexOf(a[0]);
+    const ib = STAGE_ORDER.indexOf(b[0]);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
   const maxStageValue = Math.max(1, ...stageEntries.map(([, value]) => value || 0));
 
   const matrix = health.stage_health_matrix || {};
   const orderedStages = [
-    ...STAGE_ORDER.filter(s => matrix[s] != null),
-    ...Object.keys(matrix).filter(s => !STAGE_ORDER.includes(s)),
+    ...STAGE_ORDER.filter(stage => matrix[stage] != null),
+    ...Object.keys(matrix).filter(stage => !STAGE_ORDER.includes(stage)),
   ];
-  const maxAvg = Math.max(1, ...orderedStages.map(s => matrix[s]?.avg_ms || 0));
+  const maxAvg = Math.max(1, ...orderedStages.map(stage => matrix[stage]?.avg_ms || 0));
+  const syncedJobs = mergeJobs(health.recent_jobs || [], history);
+  const activeSummary = summarizeJob(activeJobData);
 
   return (
     <div className="animate-fadeIn stack-md">
       <div>
         <h2 style={{ marginBottom: '0.5rem' }}>System Health</h2>
         <p>
-          Live backend status, stage timing charts and matrix, recent jobs, and{' '}
-          <strong>View Results</strong> to open the full extraction on the Extract tab.
+          Live backend status, stage timing charts and matrix, recent jobs, and
+          synced extract results from the main workflow.
         </p>
       </div>
+
+      {(activeJobId || activeJobData) && (
+        <div className="glass-card">
+          <div className="flex items-center justify-between gap-2" style={{ marginBottom: '0.9rem', flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ marginBottom: '0.2rem' }}>Synced Extract Session</h3>
+              <p style={{ fontSize: '0.82rem' }}>
+                This mirrors the job currently loaded on the Extract page.
+              </p>
+            </div>
+            {onOpenExtract && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ fontSize: '0.8rem', padding: '0.45rem 0.9rem' }}
+                onClick={onOpenExtract}
+              >
+                Open Extract
+              </button>
+            )}
+          </div>
+
+          <div className="health-sync-grid">
+            <div className="health-sync-card">
+              <div className="metric-label">Job ID</div>
+              <div className="health-sync-value" style={{ fontSize: '0.88rem', wordBreak: 'break-word' }}>
+                {activeJobId || activeJobData?.job_id || '-'}
+              </div>
+            </div>
+            <div className="health-sync-card">
+              <div className="metric-label">Status</div>
+              <div className="health-sync-value">{activeStatus}</div>
+            </div>
+            <div className="health-sync-card">
+              <div className="metric-label">Pages</div>
+              <div className="health-sync-value">{activeSummary.pages}</div>
+            </div>
+            <div className="health-sync-card">
+              <div className="metric-label">Tables</div>
+              <div className="health-sync-value">{activeSummary.tables}</div>
+            </div>
+            <div className="health-sync-card">
+              <div className="metric-label">Cells</div>
+              <div className="health-sync-value">{activeSummary.cells}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="health-grid">
         <div className="glass-card metric-card">
@@ -120,6 +223,14 @@ export default function HealthDashboard({ onLoadJob }) {
         <div className="glass-card metric-card">
           <p className="metric-label">Average Latency</p>
           <h3>{health.average_latency_ms} ms</h3>
+        </div>
+
+        <div className="glass-card metric-card">
+          <p className="metric-label">Worker Pool</p>
+          <h3>{health.processing_active_jobs}/{health.processing_max_workers}</h3>
+          <p style={{ fontSize: '0.75rem' }}>
+            active • {health.processing_queued_jobs} queued
+          </p>
         </div>
       </div>
 
@@ -209,10 +320,10 @@ export default function HealthDashboard({ onLoadJob }) {
       <div className="glass-card">
         <div className="flex items-center justify-between gap-2" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
           <h3>Recent Jobs</h3>
-          <span className="badge badge-info">{health.recent_jobs.length} tracked</span>
+          <span className="badge badge-info">{syncedJobs.length} synced</span>
         </div>
 
-        {health.recent_jobs.length === 0 ? (
+        {syncedJobs.length === 0 ? (
           <div className="empty-state">
             <p>No completed jobs have been recorded yet.</p>
           </div>
@@ -230,7 +341,7 @@ export default function HealthDashboard({ onLoadJob }) {
                 </tr>
               </thead>
               <tbody>
-                {health.recent_jobs.map(job => (
+                {syncedJobs.map(job => (
                   <tr key={job.job_id}>
                     <td>
                       <div className="stack-xs">
@@ -242,11 +353,22 @@ export default function HealthDashboard({ onLoadJob }) {
                       </div>
                     </td>
                     <td>
-                      <span className={`badge ${job.status === 'completed' ? 'badge-success' : 'badge-danger'}`}>
-                        {job.status}
-                      </span>
+                      <div className="stack-xs">
+                        <span className={`badge ${
+                          job.status === 'completed'
+                            ? 'badge-success'
+                            : job.status === 'error'
+                            ? 'badge-danger'
+                            : 'badge-warning'
+                        }`}>
+                          {job.status}
+                        </span>
+                        {job.job_id === activeJobId && (
+                          <span className="badge badge-info" style={{ fontSize: '0.62rem' }}>Current</span>
+                        )}
+                      </div>
                     </td>
-                    <td>{job.total_latency_ms} ms</td>
+                    <td>{job.total_latency_ms ?? '—'} ms</td>
                     <td>{job.started_at ? new Date(job.started_at).toLocaleString() : '—'}</td>
                     <td>{job.finished_at ? new Date(job.finished_at).toLocaleString() : '—'}</td>
                     {onLoadJob && (
@@ -255,11 +377,10 @@ export default function HealthDashboard({ onLoadJob }) {
                           type="button"
                           className="btn btn-secondary"
                           style={{ fontSize: '0.72rem', padding: '0.25rem 0.65rem', whiteSpace: 'nowrap' }}
-                          disabled={job.status !== 'completed'}
-                          title={job.status !== 'completed' ? 'Only completed jobs can be viewed' : 'Open in Extract'}
+                          title="Open in Extract"
                           onClick={() => onLoadJob(job)}
                         >
-                          View Results
+                          {job.status === 'completed' ? 'View Results' : 'Open Job'}
                         </button>
                       </td>
                     )}

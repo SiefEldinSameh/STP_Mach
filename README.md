@@ -81,8 +81,33 @@ Services:
 - `GET /api/results/{job_id}`
 - `PATCH /api/results/{job_id}`
 - `GET /api/results/{job_id}/csv?format=matrix|cells`
+- `GET /api/results/{job_id}/xlsx?format=matrix|cells`
 - `GET /api/results/{job_id}/crops`
 - `GET /api/health`
+
+## Non-blocking processing
+
+- `POST /api/upload` returns quickly with a `job_id`; it does not wait for OCR/table extraction to finish.
+- The heavy pipeline runs in a background `ThreadPoolExecutor`.
+- Worker count is configurable with `STP_MACH_MAX_WORKERS`.
+- On GPU, the default worker count is `1` to avoid unstable parallel inference; on CPU, the default is up to `4`.
+- `GET /api/health` now shows `processing_max_workers`, `processing_active_jobs`, and `processing_queued_jobs`.
+
+## How to test concurrency
+
+1. Start the backend and frontend normally.
+2. Open the Health page and keep it visible.
+3. Upload two or more large files back-to-back.
+4. Confirm the first upload returns a `job_id` immediately and the UI stays responsive while processing continues.
+5. Confirm the Health page shows active workers and queued jobs instead of freezing the app.
+6. Download results after completion and verify each detected table becomes its own Excel sheet.
+
+For automated backend checks:
+
+```powershell
+cd backend
+python -m unittest discover -s tests -v
+```
 
 ## Notes
 

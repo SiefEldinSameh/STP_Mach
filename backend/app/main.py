@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import OUTPUT_DIR, UPLOAD_DIR
 from app.models.loader import model_store
 from app.routers import health, results, upload
+from app.services.processing import shutdown_processing_executor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
             model_store.load_error or "(unknown)",
         )
     yield
+    shutdown_processing_executor()
     logger.info("Shutting down.")
 
 

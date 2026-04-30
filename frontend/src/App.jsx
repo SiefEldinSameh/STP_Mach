@@ -212,6 +212,10 @@ export default function App() {
     void loadJobFromHistory(job.job_id);
   };
 
+  const openExtractForActiveJob = () => {
+    setPage('home');
+  };
+
   const resetUpload = () => {
     clearPolling();
     setStatus('idle');
@@ -323,7 +327,16 @@ export default function App() {
           </>
         )}
 
-        {page === 'dashboard' && <HealthDashboard onLoadJob={navigateToJob} />}
+        {page === 'dashboard' && (
+          <HealthDashboard
+            onLoadJob={navigateToJob}
+            history={history}
+            activeJobId={activeJobId}
+            activeJobData={jobData}
+            activeStatus={status}
+            onOpenExtract={openExtractForActiveJob}
+          />
+        )}
       </main>
 
       <footer style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
